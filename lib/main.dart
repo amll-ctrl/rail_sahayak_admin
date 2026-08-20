@@ -7,50 +7,38 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   runApp(const RailSahayakAdminApp());
 }
 
 class RailSahayakAdminApp extends StatelessWidget {
   const RailSahayakAdminApp({super.key});
-
-  static const adminRed = Color(0xFFC62828);
+  static const red = Color(0xFFC62828);
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'RailSahayak Admin',
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: adminRed),
-        scaffoldBackgroundColor: const Color(0xFFFFF8F8),
-      ),
-      home: const AdminGate(),
-    );
-  }
+  Widget build(BuildContext context) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'RailSahayak Admin',
+        theme: ThemeData(
+          useMaterial3: true,
+          colorScheme: ColorScheme.fromSeed(seedColor: red),
+          scaffoldBackgroundColor: const Color(0xFFFFF8F8),
+        ),
+        home: const AdminGate(),
+      );
 }
 
 class AdminGate extends StatelessWidget {
   const AdminGate({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-        if (!snapshot.hasData) return const AdminLoginScreen();
-        return AdminAuthorizationGate(user: snapshot.data!);
-      },
-    );
-  }
+  Widget build(BuildContext context) => StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (_, s) {
+          if (s.connectionState == ConnectionState.waiting) return const _Loading();
+          if (!s.hasData) return const AdminLoginScreen();
+          return AdminAuthorizationGate(user: s.data!);
+        },
+      );
 }
 
 class AdminAuthorizationGate extends StatelessWidget {
@@ -58,818 +46,189 @@ class AdminAuthorizationGate extends StatelessWidget {
   const AdminAuthorizationGate({super.key, required this.user});
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance.collection('admin').doc(user.uid).get(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        final data = snapshot.data?.data();
-        final role = data?['role']?.toString().trim().toLowerCase();
-        final approved = data?['approved'] == true ||
-            data?['approved']?.toString().trim().toLowerCase() == 'true';
-
-        if (snapshot.hasData && data != null && role == 'admin' && approved) {
-          return const AdminDashboard();
-        }
-
-        FirebaseAuth.instance.signOut();
-        return const AdminLoginScreen();
-      },
-    );
-  }
+  Widget build(BuildContext context) => FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        future: FirebaseFirestore.instance.collection('admin').doc(user.uid).get(),
+        builder: (_, s) {
+          if (s.connectionState != ConnectionState.done) return const _Loading();
+          final d = s.data?.data();
+          final role = '${d?['role'] ?? ''}'.trim().toLowerCase();
+          final approved = d?['approved'] == true || '${d?['approved']}'.toLowerCase() == 'true';
+          if (d != null && role == 'admin' && approved) return const AdminDashboard();
+          FirebaseAuth.instance.signOut();
+          return const AdminLoginScreen();
+        },
+      );
 }
 
 class AdminLoginScreen extends StatefulWidget {
   const AdminLoginScreen({super.key});
-
   @override
   State<AdminLoginScreen> createState() => _AdminLoginScreenState();
 }
 
 class _AdminLoginScreenState extends State<AdminLoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _obscurePassword = true;
-  bool _loading = false;
+  final _form = GlobalKey<FormState>();
+  final _email = TextEditingController();
+  final _password = TextEditingController();
+  bool _loading = false, _obscure = true;
 
   @override
-  void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
+  void dispose() { _email.dispose(); _password.dispose(); super.dispose(); }
 
   Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_form.currentState!.validate()) return;
     setState(() => _loading = true);
-
     try {
-      final credential = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
-        email: _emailController.text.trim().toLowerCase(),
-        password: _passwordController.text,
-      );
-
-      final uid = credential.user?.uid;
-      if (uid == null) throw Exception('No Firebase user returned.');
-
-      final doc = await FirebaseFirestore.instance
-          .collection('admin')
-          .doc(uid)
-          .get();
-      final data = doc.data();
-      final role = data?['role']?.toString().trim().toLowerCase();
-      final approved = data?['approved'] == true ||
-          data?['approved']?.toString().trim().toLowerCase() == 'true';
-
-      if (!doc.exists || role != 'admin' || !approved) {
-        await FirebaseAuth.instance.signOut();
-        throw Exception('This account is not an approved RailSahayak administrator.');
-      }
+      final c = await FirebaseAuth.instance.signInWithEmailAndPassword(email: _email.text.trim(), password: _password.text);
+      final doc = await FirebaseFirestore.instance.collection('admin').doc(c.user!.uid).get();
+      final d = doc.data();
+      final ok = d != null && '${d['role']}'.toLowerCase() == 'admin' && (d['approved'] == true || '${d['approved']}'.toLowerCase() == 'true');
+      if (!ok) { await FirebaseAuth.instance.signOut(); throw Exception('This account is not an approved RailSahayak administrator.'); }
     } on FirebaseAuthException catch (e) {
-      if (mounted) _showMessage(_authMessage(e), error: true);
+      _message(e.message ?? 'Administrator login failed.', true);
     } catch (e) {
-      if (mounted) {
-        _showMessage(e.toString().replaceFirst('Exception: ', ''), error: true);
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+      _message(e.toString().replaceFirst('Exception: ', ''), true);
+    } finally { if (mounted) setState(() => _loading = false); }
   }
 
-  void _showMessage(String text, {bool error = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(text),
-        backgroundColor: error ? Colors.red.shade700 : null,
-      ),
-    );
-  }
-
-  String _authMessage(FirebaseAuthException e) {
-    switch (e.code) {
-      case 'invalid-credential':
-      case 'wrong-password':
-      case 'user-not-found':
-        return 'The administrator email or password is incorrect.';
-      case 'invalid-email':
-        return 'Enter a valid administrator email address.';
-      case 'too-many-requests':
-        return 'Too many attempts. Please wait and try again.';
-      default:
-        return e.message ?? 'Administrator login failed.';
-    }
-  }
+  void _message(String text, bool error) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text), backgroundColor: error ? Colors.red.shade700 : null)); }
 
   @override
-  Widget build(BuildContext context) {
-    const red = RailSahayakAdminApp.adminRed;
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Card(
-                elevation: 8,
-                shadowColor: red.withValues(alpha: 0.25),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(28),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircleAvatar(
-                          radius: 40,
-                          backgroundColor: red,
-                          child: Icon(
-                            Icons.admin_panel_settings_rounded,
-                            color: Colors.white,
-                            size: 42,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        const Text(
-                          'RailSahayak Admin',
-                          style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Approved administrators only',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                        const SizedBox(height: 30),
-                        TextFormField(
-                          controller: _emailController,
-                          enabled: !_loading,
-                          keyboardType: TextInputType.emailAddress,
-                          decoration: InputDecoration(
-                            labelText: 'Administrator Email',
-                            prefixIcon: const Icon(Icons.email_outlined),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          validator: (value) {
-                            final email = value?.trim() ?? '';
-                            return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                                    .hasMatch(email)
-                                ? null
-                                : 'Enter a valid administrator email';
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: _passwordController,
-                          enabled: !_loading,
-                          obscureText: _obscurePassword,
-                          decoration: InputDecoration(
-                            labelText: 'Password',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
-                              ),
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          validator: (value) => value == null || value.isEmpty
-                              ? 'Enter your password'
-                              : null,
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 54,
-                          child: ElevatedButton.icon(
-                            onPressed: _loading ? null : _login,
-                            icon: _loading
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.login),
-                            label: Text(
-                              _loading ? 'Signing in...' : 'Administrator Login',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: red,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(child: Center(child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 480), child: Card(
+            elevation: 8,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+            child: Padding(padding: const EdgeInsets.all(28), child: Form(key: _form, child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircleAvatar(radius: 40, backgroundColor: RailSahayakAdminApp.red, child: Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 42)),
+              const SizedBox(height: 20), const Text('RailSahayak Admin', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8), const Text('Approved administrators only'), const SizedBox(height: 28),
+              TextFormField(controller: _email, enabled: !_loading, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Administrator Email', prefixIcon: Icon(Icons.email_outlined), border: OutlineInputBorder()), validator: (v) => RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v?.trim() ?? '') ? null : 'Enter a valid administrator email'),
+              const SizedBox(height: 16),
+              TextFormField(controller: _password, enabled: !_loading, obscureText: _obscure, decoration: InputDecoration(labelText: 'Password', prefixIcon: const Icon(Icons.lock_outline), border: const OutlineInputBorder(), suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off), onPressed: () => setState(() => _obscure = !_obscure))), validator: (v) => v == null || v.isEmpty ? 'Enter your password' : null),
+              const SizedBox(height: 24), SizedBox(width: double.infinity, height: 54, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: RailSahayakAdminApp.red, foregroundColor: Colors.white), onPressed: _loading ? null : _login, icon: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.login), label: Text(_loading ? 'Signing in...' : 'Administrator Login'))),
+            ]))),
+          )),
+        ))),
+      );
 }
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
-  static const red = RailSahayakAdminApp.adminRed;
-
-  void _open(BuildContext context, Widget page) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
-  }
+  void _open(BuildContext c, Widget p) => Navigator.push(c, MaterialPageRoute(builder: (_) => p));
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Admin Dashboard'),
-        backgroundColor: red,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => (context as Element).markNeedsBuild(),
-            icon: const Icon(Icons.refresh),
-          ),
-          IconButton(
-            tooltip: 'Sign out',
-            onPressed: () => FirebaseAuth.instance.signOut(),
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection('requests').snapshots(),
-        builder: (context, requestSnapshot) {
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: FirebaseFirestore.instance.collection('users').snapshots(),
-            builder: (context, userSnapshot) {
-              if (requestSnapshot.hasError || userSnapshot.hasError) {
-                return const Center(
-                  child: Text('Unable to load dashboard data. Check Firestore permissions.'),
-                );
-              }
-              if (!requestSnapshot.hasData || !userSnapshot.hasData) {
-                return const Center(
-                  child: CircularProgressIndicator(color: red),
-                );
-              }
-
-              final requests = requestSnapshot.data!.docs;
-              final users = userSnapshot.data!.docs;
-              final staff = users
-                  .where((u) => '${u.data()['role']}'.toLowerCase() == 'staff')
-                  .length;
-
-              int count(String type) {
-                return requests.where((request) {
-                  final status = '${request.data()['status'] ?? ''}'
-                      .trim()
-                      .toLowerCase();
-                  if (type == 'requested') {
-                    return status == 'requested' || status == 'pending';
-                  }
-                  if (type == 'active') {
-                    return [
-                      'assigned',
-                      'assisting',
-                      'accepted',
-                      'in_progress',
-                      'in progress',
-                    ].contains(status);
-                  }
-                  return status == 'completed';
-                }).length;
-              }
-
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Overview',
-                      style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Live RailSahayak system statistics',
-                      style: TextStyle(color: Colors.grey.shade600),
-                    ),
-                    const SizedBox(height: 24),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisSpacing: 14,
-                      mainAxisSpacing: 14,
-                      childAspectRatio: 1.2,
-                      children: [
-                        _StatCard(
-                          icon: Icons.people_rounded,
-                          title: 'Total Users',
-                          value: users.length.toString(),
-                          color: Colors.blue,
-                          onTap: () => _open(context, const UserManagementScreen()),
-                        ),
-                        _StatCard(
-                          icon: Icons.badge_rounded,
-                          title: 'Staff',
-                          value: staff.toString(),
-                          color: red,
-                          onTap: () => _open(context, const StaffManagementScreen()),
-                        ),
-                        _StatCard(
-                          icon: Icons.hourglass_top_rounded,
-                          title: 'Requested',
-                          value: count('requested').toString(),
-                          color: Colors.orange,
-                          onTap: () => _open(
-                            context,
-                            const RequestManagementScreen(filter: 'requested'),
-                          ),
-                        ),
-                        _StatCard(
-                          icon: Icons.directions_run_rounded,
-                          title: 'Active',
-                          value: count('active').toString(),
-                          color: Colors.blue,
-                          onTap: () => _open(
-                            context,
-                            const RequestManagementScreen(filter: 'active'),
-                          ),
-                        ),
-                        _StatCard(
-                          icon: Icons.check_circle_rounded,
-                          title: 'Completed',
-                          value: count('completed').toString(),
-                          color: Colors.green,
-                          onTap: () => _open(
-                            context,
-                            const RequestManagementScreen(filter: 'completed'),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 28),
-                    const Text(
-                      'Management',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 14),
-                    GridView.count(
-                      crossAxisCount: 2,
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      children: [
-                        _AdminCard(
-                          icon: Icons.people_alt_rounded,
-                          title: 'Staff',
-                          onTap: () => _open(context, const StaffManagementScreen()),
-                        ),
-                        _AdminCard(
-                          icon: Icons.assistant_rounded,
-                          title: 'Requests',
-                          onTap: () => _open(context, const RequestManagementScreen()),
-                        ),
-                        _AdminCard(
-                          icon: Icons.person_rounded,
-                          title: 'Users',
-                          onTap: () => _open(context, const UserManagementScreen()),
-                        ),
-                        _AdminCard(
-                          icon: Icons.settings_rounded,
-                          title: 'Settings',
-                          onTap: () => _open(context, const AdminSettingsScreen()),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              );
-            },
-          );
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Admin Dashboard'), backgroundColor: RailSahayakAdminApp.red, foregroundColor: Colors.white, actions: [IconButton(tooltip: 'Sign out', icon: const Icon(Icons.logout), onPressed: () => FirebaseAuth.instance.signOut())]),
+    body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('requests').snapshots(),
+      builder: (_, rs) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance.collection('users').snapshots(),
+        builder: (context, us) {
+          if (rs.hasError || us.hasError) return const Center(child: Text('Unable to load dashboard data. Check Firestore permissions.'));
+          if (!rs.hasData || !us.hasData) return const _Loading();
+          final users = us.data!.docs, requests = rs.data!.docs;
+          final staff = users.where((x) => '${x.data()['role']}'.toLowerCase() == 'staff').length;
+          final pendingStaff = users.where(_isPendingStaff).length;
+          int count(String type) => requests.where((x) { final s='${x.data()['status'] ?? ''}'.toLowerCase(); if(type=='requested') return s=='requested'||s=='pending'; if(type=='active') return ['assigned','assisting','accepted','in_progress','in progress'].contains(s); return s=='completed'; }).length;
+          return SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Overview', style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold)), const SizedBox(height: 8), const Text('Live RailSahayak system statistics'), const SizedBox(height: 20),
+            GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 14, mainAxisSpacing: 14, childAspectRatio: 1.25, children: [
+              _Stat(icon: Icons.people, title: 'Total Users', value: '${users.length}', color: Colors.blue, onTap: () => _open(context, const UserManagementScreen())),
+              _Stat(icon: Icons.badge, title: 'Staff', value: '$staff', color: RailSahayakAdminApp.red, onTap: () => _open(context, const StaffManagementScreen())),
+              _Stat(icon: Icons.person_add_alt_1, title: 'Staff Pending', value: '$pendingStaff', color: Colors.orange, onTap: () => _open(context, const PendingStaffScreen())),
+              _Stat(icon: Icons.hourglass_top, title: 'Requested', value: '${count('requested')}', color: Colors.orange, onTap: () => _open(context, const RequestManagementScreen(filter: 'requested'))),
+              _Stat(icon: Icons.directions_run, title: 'Active', value: '${count('active')}', color: Colors.blue, onTap: () => _open(context, const RequestManagementScreen(filter: 'active'))),
+              _Stat(icon: Icons.check_circle, title: 'Completed', value: '${count('completed')}', color: Colors.green, onTap: () => _open(context, const RequestManagementScreen(filter: 'completed'))),
+            ]),
+            const SizedBox(height: 28), const Text('Management', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)), const SizedBox(height: 14),
+            GridView.count(crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), crossAxisSpacing: 16, mainAxisSpacing: 16, children: [
+              _Admin(icon: Icons.person_add_alt_1, title: 'Staff Approval', onTap: () => _open(context, const PendingStaffScreen())),
+              _Admin(icon: Icons.people_alt, title: 'Staff', onTap: () => _open(context, const StaffManagementScreen())),
+              _Admin(icon: Icons.assistant, title: 'Requests', onTap: () => _open(context, const RequestManagementScreen())),
+              _Admin(icon: Icons.person, title: 'Users', onTap: () => _open(context, const UserManagementScreen())),
+              _Admin(icon: Icons.settings, title: 'Settings', onTap: () => _open(context, const AdminSettingsScreen())),
+            ]),
+          ]));
         },
       ),
-    );
-  }
+    ),
+  );
+}
+
+bool _isPendingStaff(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+  final d = doc.data();
+  final role = '${d['role'] ?? ''}'.trim().toLowerCase();
+  final status = '${d['status'] ?? d['approvalStatus'] ?? ''}'.trim().toLowerCase();
+  final requested = d['staffRequested'] == true || d['isStaffRequest'] == true || role == 'staff' || role == 'staff_pending' || role == 'pending_staff';
+  return requested && ['pending','requested','waiting','pending_approval','staff_pending'].contains(status.isEmpty && role.contains('pending') ? 'pending' : status);
+}
+
+class PendingStaffScreen extends StatelessWidget {
+  const PendingStaffScreen({super.key});
+  Future<void> _approve(String id) => FirebaseFirestore.instance.collection('users').doc(id).set({'role':'staff','status':'approved','approved':true,'approvalStatus':'approved','staffRequested':true,'approvedAt':FieldValue.serverTimestamp(),'updatedAt':FieldValue.serverTimestamp()}, SetOptions(merge:true));
+  Future<void> _reject(String id) => FirebaseFirestore.instance.collection('users').doc(id).set({'status':'rejected','approved':false,'approvalStatus':'rejected','rejectedAt':FieldValue.serverTimestamp(),'updatedAt':FieldValue.serverTimestamp()}, SetOptions(merge:true));
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Staff Approval Requests'), backgroundColor: RailSahayakAdminApp.red, foregroundColor: Colors.white),
+    body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').snapshots(),
+      builder: (context, s) {
+        if (s.hasError) return Center(child: Text('Could not load staff requests: ${s.error}'));
+        if (!s.hasData) return const _Loading();
+        final docs = s.data!.docs.where(_isPendingStaff).toList();
+        if (docs.isEmpty) return const Center(child: Text('No pending staff approval requests.'));
+        return ListView.builder(padding: const EdgeInsets.all(16), itemCount: docs.length, itemBuilder: (context, i) {
+          final doc=docs[i]; final d=doc.data();
+          return Card(child: Padding(padding: const EdgeInsets.all(14), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('${d['name'] ?? d['displayName'] ?? 'Staff applicant'}', style: const TextStyle(fontSize:17,fontWeight:FontWeight.bold)),
+            const SizedBox(height: 6), Text('Email: ${d['email'] ?? '-'}\nPhone: ${d['phone'] ?? '-'}'), const SizedBox(height: 12),
+            Row(children:[Expanded(child: OutlinedButton.icon(onPressed: () async { await _reject(doc.id); }, icon: const Icon(Icons.close), label: const Text('Reject'), style: OutlinedButton.styleFrom(foregroundColor: Colors.red))), const SizedBox(width:12), Expanded(child: ElevatedButton.icon(onPressed: () async { await _approve(doc.id); }, icon: const Icon(Icons.check), label: const Text('Approve'), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white)))])
+          ]));
+        });
+      },
+    ),
+  );
 }
 
 class StaffManagementScreen extends StatelessWidget {
   const StaffManagementScreen({super.key});
-  static const red = RailSahayakAdminApp.adminRed;
-
   @override
-  Widget build(BuildContext context) {
-    return _CollectionScreen(
-      title: 'Staff Management',
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .where('role', isEqualTo: 'staff')
-          .snapshots(),
-      empty: 'No staff accounts found.',
-      itemBuilder: (context, doc) {
-        final data = doc.data();
-        final disabled = '${data['status']}'.toLowerCase() == 'disabled';
-        return Card(
-          child: ListTile(
-            leading: Icon(
-              disabled ? Icons.person_off : Icons.badge,
-              color: disabled ? Colors.grey : red,
-            ),
-            title: Text('${data['name'] ?? 'Railway Staff'}'),
-            subtitle: Text(
-              '${data['email'] ?? ''}\n${disabled ? 'Access disabled' : 'Active staff'}',
-            ),
-            isThreeLine: true,
-            trailing: IconButton(
-              tooltip: disabled ? 'Enable staff' : 'Disable staff',
-              icon: Icon(
-                disabled ? Icons.person_add : Icons.block,
-                color: red,
-              ),
-              onPressed: () {
-                FirebaseFirestore.instance.collection('users').doc(doc.id).set(
-                  {
-                    'status': disabled ? 'approved' : 'disabled',
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  },
-                  SetOptions(merge: true),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => _CollectionScreen(title:'Staff Management', stream: FirebaseFirestore.instance.collection('users').snapshots(), empty:'No approved staff accounts found.', filter:(d){final x=d.data(); return '${x['role']}'.toLowerCase()=='staff' && '${x['status']}'.toLowerCase()!='pending' && '${x['approvalStatus']}'.toLowerCase()!='pending';}, itemBuilder:(context,doc){final d=doc.data(); final disabled='${d['status']}'.toLowerCase()=='disabled'; return Card(child:ListTile(leading:Icon(disabled?Icons.person_off:Icons.badge,color:disabled?Colors.grey:RailSahayakAdminApp.red),title:Text('${d['name']??'Railway Staff'}'),subtitle:Text('${d['email']??''}\n${disabled?'Access disabled':'Approved staff'}'),isThreeLine:true,trailing:IconButton(icon:Icon(disabled?Icons.person_add:Icons.block,color:RailSahayakAdminApp.red),onPressed:()=>FirebaseFirestore.instance.collection('users').doc(doc.id).set({'status':disabled?'approved':'disabled','updatedAt':FieldValue.serverTimestamp()},SetOptions(merge:true)))));});
 }
 
 class UserManagementScreen extends StatelessWidget {
   const UserManagementScreen({super.key});
-  static const red = RailSahayakAdminApp.adminRed;
-
   @override
-  Widget build(BuildContext context) {
-    return _CollectionScreen(
-      title: 'User Management',
-      stream: FirebaseFirestore.instance.collection('users').snapshots(),
-      empty: 'No users found.',
-      itemBuilder: (context, doc) {
-        final data = doc.data();
-        final role = '${data['role'] ?? 'passenger'}';
-        final disabled = '${data['status']}'.toLowerCase() == 'disabled';
-        return Card(
-          child: ListTile(
-            leading: CircleAvatar(
-              child: Icon(
-                role.toLowerCase() == 'staff'
-                    ? Icons.badge
-                    : Icons.person,
-              ),
-            ),
-            title: Text('${data['name'] ?? 'User'}'),
-            subtitle: Text(
-              '${data['email'] ?? ''}\n$role${disabled ? ' • Disabled' : ''}',
-            ),
-            isThreeLine: true,
-            trailing: IconButton(
-              tooltip: disabled ? 'Enable user' : 'Disable user',
-              icon: Icon(
-                disabled ? Icons.person_add : Icons.block,
-                color: red,
-              ),
-              onPressed: () {
-                FirebaseFirestore.instance.collection('users').doc(doc.id).set(
-                  {
-                    'status': disabled ? 'active' : 'disabled',
-                    'updatedAt': FieldValue.serverTimestamp(),
-                  },
-                  SetOptions(merge: true),
-                );
-              },
-            ),
-          ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => _CollectionScreen(title:'User Management',stream:FirebaseFirestore.instance.collection('users').snapshots(),empty:'No users found.',itemBuilder:(context,doc){final d=doc.data();final role='${d['role']??'passenger'}';final disabled='${d['status']}'.toLowerCase()=='disabled';return Card(child:ListTile(leading:CircleAvatar(child:Icon(role.toLowerCase()=='staff'?Icons.badge:Icons.person)),title:Text('${d['name']??'User'}'),subtitle:Text('${d['email']??''}\n$role${disabled?' • Disabled':''}'),isThreeLine:true,trailing:IconButton(icon:Icon(disabled?Icons.person_add:Icons.block,color:RailSahayakAdminApp.red),onPressed:()=>FirebaseFirestore.instance.collection('users').doc(doc.id).set({'status':disabled?'active':'disabled','updatedAt':FieldValue.serverTimestamp()},SetOptions(merge:true)))));});
 }
 
 class RequestManagementScreen extends StatelessWidget {
   final String? filter;
-  const RequestManagementScreen({super.key, this.filter});
-
-  bool _matches(String status) {
-    final value = status.toLowerCase();
-    if (filter == null) return true;
-    if (filter == 'requested') {
-      return value == 'requested' || value == 'pending';
-    }
-    if (filter == 'active') {
-      return [
-        'assigned',
-        'assisting',
-        'accepted',
-        'in_progress',
-        'in progress',
-      ].contains(value);
-    }
-    return value == 'completed';
-  }
-
+  const RequestManagementScreen({super.key,this.filter});
+  bool _match(String s){s=s.toLowerCase();if(filter==null)return true;if(filter=='requested')return s=='requested'||s=='pending';if(filter=='active')return ['assigned','assisting','accepted','in_progress','in progress'].contains(s);return s=='completed';}
   @override
-  Widget build(BuildContext context) {
-    final title = filter == null
-        ? 'Assistance Requests'
-        : '${filter![0].toUpperCase()}${filter!.substring(1)} Requests';
-
-    return _CollectionScreen(
-      title: title,
-      stream: FirebaseFirestore.instance.collection('requests').snapshots(),
-      empty: 'No assistance requests found.',
-      itemBuilder: (context, doc) {
-        final data = doc.data();
-        final status = '${data['status'] ?? 'requested'}';
-        if (!_matches(status)) return const SizedBox.shrink();
-
-        final normalized = status.toLowerCase();
-        final allowed = [
-          'requested',
-          'assigned',
-          'assisting',
-          'completed',
-          'cancelled',
-        ];
-
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${data['passengerName'] ?? data['name'] ?? 'Passenger'}',
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                Text(
-                  'Train: ${data['trainName'] ?? data['trainNo'] ?? '-'}\n'
-                  'Coach: ${data['coach'] ?? '-'}\n'
-                  'PNR: ${data['pnr'] ?? '-'}\n'
-                  'Status: $status',
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: allowed.contains(normalized) ? normalized : 'requested',
-                  decoration: const InputDecoration(
-                    labelText: 'Update status',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: allowed
-                      .map(
-                        (value) => DropdownMenuItem(
-                          value: value,
-                          child: Text(value),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) return;
-                    FirebaseFirestore.instance
-                        .collection('requests')
-                        .doc(doc.id)
-                        .set(
-                      {
-                        'status': value,
-                        'updatedAt': FieldValue.serverTimestamp(),
-                        if (value == 'completed')
-                          'completedAt': FieldValue.serverTimestamp(),
-                        if (value == 'cancelled')
-                          'cancelledAt': FieldValue.serverTimestamp(),
-                      },
-                      SetOptions(merge: true),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context)=>_CollectionScreen(title:filter==null?'Assistance Requests':'${filter![0].toUpperCase()}${filter!.substring(1)} Requests',stream:FirebaseFirestore.instance.collection('requests').snapshots(),empty:'No assistance requests found.',filter:(d)=>_match('${d.data()['status']??'requested'}'),itemBuilder:(context,doc){final d=doc.data();final status='${d['status']??'requested'}'.toLowerCase();const allowed=['requested','assigned','assisting','completed','cancelled'];return Card(child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text('${d['passengerName']??d['name']??'Passenger'}',style:const TextStyle(fontSize:17,fontWeight:FontWeight.bold)),const SizedBox(height:6),Text('Train: ${d['trainName']??d['trainNo']??'-'}\nCoach: ${d['coach']??'-'}\nPNR: ${d['pnr']??'-'}\nStatus: $status'),const SizedBox(height:10),DropdownButtonFormField<String>(value:allowed.contains(status)?status:'requested',items:allowed.map((x)=>DropdownMenuItem(value:x,child:Text(x))).toList(),onChanged:(v){if(v!=null)FirebaseFirestore.instance.collection('requests').doc(doc.id).set({'status':v,'updatedAt':FieldValue.serverTimestamp()},SetOptions(merge:true));})])));});
 }
 
 class AdminSettingsScreen extends StatelessWidget {
   const AdminSettingsScreen({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Admin Settings')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.admin_panel_settings),
-              title: const Text('Administrator Account'),
-              subtitle: Text(user?.email ?? 'No email available'),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.lock_reset),
-              title: const Text('Send password reset email'),
-              onTap: user?.email == null
-                  ? null
-                  : () async {
-                      await FirebaseAuth.instance.sendPasswordResetEmail(
-                        email: user!.email!,
-                      );
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Password reset email sent.')),
-                        );
-                      }
-                    },
-            ),
-          ),
-          const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Sign out'),
-              onTap: () => FirebaseAuth.instance.signOut(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context){final u=FirebaseAuth.instance.currentUser;return Scaffold(appBar:AppBar(title:const Text('Admin Settings')),body:ListView(padding:const EdgeInsets.all(20),children:[Card(child:ListTile(leading:const Icon(Icons.admin_panel_settings),title:const Text('Administrator Account'),subtitle:Text(u?.email??'No email available'))),Card(child:ListTile(leading:const Icon(Icons.lock_reset),title:const Text('Send password reset email'),onTap:u?.email==null?null:() async {await FirebaseAuth.instance.sendPasswordResetEmail(email:u!.email!);if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Password reset email sent.')));})),Card(child:ListTile(leading:const Icon(Icons.logout,color:Colors.red),title:const Text('Sign out'),onTap:()=>FirebaseAuth.instance.signOut()))]));}
 }
 
 class _CollectionScreen extends StatelessWidget {
-  final String title;
-  final Stream<QuerySnapshot<Map<String, dynamic>>> stream;
-  final String empty;
-  final Widget Function(
-    BuildContext context,
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
-  ) itemBuilder;
-
-  const _CollectionScreen({
-    required this.title,
-    required this.stream,
-    required this.empty,
-    required this.itemBuilder,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: stream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Could not load data: ${snapshot.error}'));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final docs = snapshot.data!.docs;
-          if (docs.isEmpty) return Center(child: Text(empty));
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: docs.length,
-            itemBuilder: (context, index) => itemBuilder(context, docs[index]),
-          );
-        },
-      ),
-    );
-  }
+  final String title, empty;
+  final Stream<QuerySnapshot<Map<String,dynamic>>> stream;
+  final bool Function(QueryDocumentSnapshot<Map<String,dynamic>>) filter;
+  final Widget Function(BuildContext,QueryDocumentSnapshot<Map<String,dynamic>>) itemBuilder;
+  const _CollectionScreen({required this.title,required this.stream,required this.empty,required this.itemBuilder,bool Function(QueryDocumentSnapshot<Map<String,dynamic>>)? filter}):filter=filter??_all;
+  static bool _all(QueryDocumentSnapshot<Map<String,dynamic>> _) => true;
+  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:Text(title)),body:StreamBuilder<QuerySnapshot<Map<String,dynamic>>>(stream:stream,builder:(context,s){if(s.hasError)return Center(child:Text('Could not load data: ${s.error}'));if(!s.hasData)return const _Loading();final docs=s.data!.docs.where(filter).toList();if(docs.isEmpty)return Center(child:Text(empty));return ListView.builder(padding:const EdgeInsets.all(16),itemCount:docs.length,itemBuilder:(context,i)=>itemBuilder(context,docs[i]));}));
 }
 
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String value;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _StatCard({
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 2,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Icon(icon, color: color, size: 30),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _AdminCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-
-  const _AdminCard({
-    required this.icon,
-    required this.title,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    const red = RailSahayakAdminApp.adminRed;
-    return Card(
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 48, color: red),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+class _Loading extends StatelessWidget { const _Loading(); @override Widget build(BuildContext context)=>const Scaffold(body:Center(child:CircularProgressIndicator(color:RailSahayakAdminApp.red))); }
+class _Stat extends StatelessWidget { final IconData icon;final String title,value;final Color color;final VoidCallback onTap;const _Stat({required this.icon,required this.title,required this.value,required this.color,required this.onTap});@override Widget build(BuildContext context)=>Card(child:InkWell(onTap:onTap,borderRadius:BorderRadius.circular(12),child:Padding(padding:const EdgeInsets.all(14),child:Column(crossAxisAlignment:CrossAxisAlignment.start,mainAxisAlignment:MainAxisAlignment.spaceBetween,children:[Icon(icon,color:color,size:30),Text(value,style:const TextStyle(fontSize:27,fontWeight:FontWeight.bold)),Text(title,style:const TextStyle(fontWeight:FontWeight.w600))]))));}
+class _Admin extends StatelessWidget { final IconData icon;final String title;final VoidCallback onTap;const _Admin({required this.icon,required this.title,required this.onTap});@override Widget build(BuildContext context)=>Card(child:InkWell(onTap:onTap,borderRadius:BorderRadius.circular(18),child:Column(mainAxisAlignment:MainAxisAlignment.center,children:[const SizedBox(height:8),Icon(icon,size:42,color:RailSahayakAdminApp.red),const SizedBox(height:10),Text(title,style:const TextStyle(fontWeight:FontWeight.bold))])));}
